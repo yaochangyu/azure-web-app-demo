@@ -1,0 +1,45 @@
+# Build outputs
+bin/
+obj/
+
+# User-specific files
+*.user
+*.userosscache
+*.suo
+*.userprefs
+*.rsuser
+
+# IDEs and tools
+.vs/
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# NuGet
+packages/
+*.nupkg
+*.snupkg
+
+# Test results
+TestResults/
+
+# Logs
+*.log
+
+# Publish
+publish/
+
+# ASP.NET Core
+wwwroot/lib/
+
+# Node
+node_modules/
+
+# dotnet tool artifacts
+.dotnet/
+
+# Azure
+.azure/
