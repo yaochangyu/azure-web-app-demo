@@ -31,6 +31,9 @@ TestResults/
 
 # Publish
 publish/
+publish-local/
+publish-local.zip
+*.zip
 
 # ASP.NET Core
 wwwroot/lib/
