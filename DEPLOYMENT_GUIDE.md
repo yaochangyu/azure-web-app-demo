@@ -1,129 +1,237 @@
-# GitHub Actions 部署到 Azure App Service
+# 部署指南：GitHub Actions 自動部署到 Azure App Service
 
-本指南說明如何使用 GitHub Actions 自動部署 ASP.NET Core 應用到 Azure App Service。
+本指南說明如何設定自動部署和手動部署 ASP.NET Core 應用到 Azure App Service。
 
 ## 前置需求
 
 1. ✅ Azure 帳戶
 2. ✅ GitHub 倉庫
-3. ✅ Azure App Service (已有 `ASP-Lab-b4d1` 計劃)
-4. ✅ 已建立的 Web App
-
-## 部署流程
-
-### 1️⃣ 建立 Web App（如果還未建立）
-
-```bash
-# 建立 Web App
-az webapp create \
-  --resource-group Lab \
-  --plan ASP-Lab-b4d1 \
-  --name my-aspnet-app \
-  --runtime "DOTNET|8.0"
-```
-
-替換 `my-aspnet-app` 為你想要的應用名稱。
-
-### 2️⃣ 取得發佈設定檔
-
-```bash
-# 下載發佈設定檔
-az webapp deployment list-publishing-profiles \
-  --resource-group Lab \
-  --name my-aspnet-app \
-  --query "[0].xml" \
-  --output tsv > PublishSettings.xml
-```
-
-### 3️⃣ 設定 GitHub Secrets
-
-在你的 GitHub 倉庫中，進入 **Settings → Secrets and variables → Actions**，新增以下 Secrets：
-
-#### 選項 A：使用發佈設定檔（推薦）
-
-1. **AZURE_WEBAPP_PUBLISH_PROFILE**：
-   - 複製 `PublishSettings.xml` 的內容
-   - 在 GitHub 新增為 Secret
-
-#### 選項 B：使用 Azure Credentials（更安全）
-
-1. 執行命令建立服務主體：
-```bash
-az ad sp create-for-rbac \
-  --name "github-actions-sp" \
-  --role contributor \
-  --scopes /subscriptions/{subscriptionId}/resourceGroups/Lab \
-  --json-auth
-```
-
-2. 複製輸出內容
-3. 在 GitHub 新增為 **AZURE_CREDENTIALS** Secret
-
-### 4️⃣ 更新工作流檔案
-
-編輯 `.github/workflows/deploy-to-azure.yml`：
-
-```yaml
-env:
-  AZURE_WEBAPP_NAME: 'my-aspnet-app'  # 替換為你的 App Service 名稱
-```
-
-### 5️⃣ 推送程式碼
-
-```bash
-git add .
-git commit -m "Add GitHub Actions deployment workflow"
-git push origin main
-```
-
-工作流會自動觸發並部署你的應用！
-
-## 可選：手動觸發部署
-
-在 GitHub Actions 標籤下，點擊 **Run workflow** 手動執行部署。
-
-## 監控部署
-
-1. 進入倉庫的 **Actions** 標籤
-2. 查看最新的工作流執行狀態
-3. 查看詳細的構建和部署日誌
-
-## 部署後驗證
-
-```bash
-# 檢查應用狀態
-az webapp show \
-  --resource-group Lab \
-  --name my-aspnet-app \
-  --query "state"
-
-# 取得應用 URL
-az webapp show \
-  --resource-group Lab \
-  --name my-aspnet-app \
-  --query "defaultHostName" \
-  --output tsv
-```
-
-## 常見問題
-
-### 部署失敗？
-
-1. 檢查 App Service 配置
-2. 檢查依賴版本（.NET 版本等）
-3. 查看 GitHub Actions 日誌以了解具體錯誤
-
-### 如何更新 .NET 版本？
-
-編輯 `deploy-to-azure.yml`：
-```yaml
-DOTNET_VERSION: '7.0.x'  # 或其他版本
-```
-
-### 自動部署不工作？
-
-確保 `.github/workflows/deploy-to-azure.yml` 已提交到 GitHub。
+3. ✅ Azure App Service Plan（例：`web-app`）
+4. ✅ Azure App Service（例：`azure-web-app-api`）
+5. ✅ GitHub Secrets：`AZURE_WEBAPP_PUBLISH_PROFILE`（發佈設定檔）
 
 ---
 
-🎉 部署完成！你的 ASP.NET Core 應用現在會在每次 push 到 main 分支時自動部署。
+## 部署流程
+
+### 📘 自動部署（推薦）
+
+自動部署通過 GitHub Actions 在每次 push 到 `main` 分支時觸發。無需手動操作，程式碼會自動編譯、測試、發佈和部署。
+
+#### 步驟 1️⃣ 確認 App Service 已創建
+
+```bash
+# 檢查是否已有 App Service
+az webapp list --resource-group Lab --output table
+
+# 如果沒有，創建 App Service Plan
+az appservice plan create \
+  --name web-app \
+  --resource-group Lab \
+  --sku B1 \
+  --is-linux
+
+# 創建 App Service
+az webapp create \
+  --resource-group Lab \
+  --plan web-app \
+  --name azure-web-app-api \
+  --runtime "DOTNETCORE|10.0"
+```
+
+#### 步驟 2️⃣ 取得發佈設定檔
+
+```bash
+# 下載發佈設定檔（XML 格式）
+az webapp deployment list-publishing-profiles \
+  --resource-group Lab \
+  --name azure-web-app-api \
+  --xml
+```
+
+#### 步驟 3️⃣ 設定 GitHub Secret
+
+**方式 A：使用 GitHub 網頁界面**
+
+1. 進入你的 GitHub 倉庫
+2. 點擊 **Settings** → **Secrets and variables** → **Actions**
+3. 點擊 **New repository secret**
+4. 名稱：`AZURE_WEBAPP_PUBLISH_PROFILE`
+5. 值：貼上上面的完整 XML 內容
+6. 點擊 **Add secret**
+
+**方式 B：使用 GitHub CLI（更快）**
+
+```bash
+# 將 XML 保存到檔案
+az webapp deployment list-publishing-profiles \
+  --resource-group Lab \
+  --name azure-web-app-api \
+  --xml > /tmp/publish-profile.xml
+
+# 設定為 GitHub Secret
+gh secret set AZURE_WEBAPP_PUBLISH_PROFILE \
+  --repo yaochangyu/azure-web-app \
+  < /tmp/publish-profile.xml
+
+# 驗證 Secret 已設定
+gh secret list --repo yaochangyu/azure-web-app
+```
+
+#### 步驟 4️⃣ 推送程式碼以觸發部署
+
+```bash
+# 進行代碼修改後
+git add .
+git commit -m "Your commit message"
+git push origin main
+```
+
+**自動部署將立即開始！** 🚀
+
+#### 監控自動部署
+
+1. 進入 GitHub 倉庫
+2. 點擊 **Actions** 標籤
+3. 查看最新工作流執行狀態（綠色 ✅ 表示成功）
+4. 點擊具體工作流查看詳細日誌
+
+#### 自動部署的優點
+
+✨ 無需手動操作  
+⚡ 代碼 push 後自動部署  
+🔒 安全可靠  
+📊 可追蹤部署歷史  
+
+---
+
+### 📗 手動部署
+
+當需要立即部署或不想通過 GitHub Actions 時，可以手動部署。
+
+#### 步驟 1️⃣ 編譯應用
+
+```bash
+# 進入項目目錄
+cd /mnt/d/lab/azure-web-app
+
+# 恢復依賴
+dotnet restore AspNetCoreApp/AspNetCoreApp.csproj
+
+# 編譯應用（Release 配置）
+dotnet publish AspNetCoreApp/AspNetCoreApp.csproj \
+  --configuration Release \
+  --output ./publish-local \
+  --force
+```
+
+#### 步驟 2️⃣ 打包發佈檔案
+
+```bash
+# ⚠️ 重要：從目錄內開始 zip，不要包含 publish-local 目錄本身
+cd ./publish-local
+zip -r ../publish-local.zip .
+cd ..
+```
+
+**為什麼這樣打包？**
+
+正確的 zip 結構應該是：
+```
+publish-local.zip
+├── AspNetCoreApp
+├── AspNetCoreApp.dll
+├── appsettings.json
+├── web.config
+└── ...（其他檔案）
+```
+
+#### 步驟 3️⃣ 部署到 Azure
+
+```bash
+# 使用 Azure CLI 部署（推薦）
+az webapp deploy \
+  --resource-group Lab \
+  --name azure-web-app-api \
+  --src-path ./publish-local.zip \
+  --type zip
+```
+
+部署過程會顯示進度，等待 `Deployment has completed successfully` 訊息。
+
+#### 步驟 4️⃣ 驗證部署
+
+```bash
+# 檢查應用狀態（應為 Running）
+az webapp show \
+  --resource-group Lab \
+  --name azure-web-app-api \
+  --query "state"
+
+# 測試天氣預報 API
+curl -s https://azure-web-app-api.azurewebsites.net/api/weatherforecast | jq .
+
+# 測試版本 API
+curl -s https://azure-web-app-api.azurewebsites.net/api/version | jq .
+```
+
+#### 手動部署的用途
+
+⚡ 需要立即部署時使用  
+🔧 測試部署配置  
+📋 在本地驗證應用後部署  
+
+---
+
+## 常見問題
+
+### Q1：自動部署失敗怎麼辦？
+
+**A：檢查以下幾點：**
+
+1. **檢查 Secret 設定**
+   ```bash
+   gh secret list --repo yaochangyu/azure-web-app
+   ```
+
+2. **查看 GitHub Actions 日誌**
+   - 進入倉庫 → **Actions** 標籤
+   - 點擊失敗的工作流查看錯誤訊息
+
+3. **檢查 App Service 狀態**
+   ```bash
+   az webapp show --resource-group Lab --name azure-web-app-api --query "state"
+   ```
+
+### Q2：手動部署失敗？
+
+**A：檢查 Zip 打包結構和 .NET 版本匹配。**
+
+### Q3：應該使用自動還是手動部署？
+
+**A：日常開發使用自動部署，緊急情況使用手動部署。**
+
+---
+
+## API 端點
+
+### 天氣預報 API
+```
+GET /api/weatherforecast
+```
+
+### 版本 API
+```
+GET /api/version
+```
+
+---
+
+## 應用 URL
+
+https://azure-web-app-api.azurewebsites.net
+
+---
+
+🎉 部署完成！推薦使用自動部署，只需 `git push origin main` 即可。
+
