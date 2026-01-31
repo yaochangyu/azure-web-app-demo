@@ -8,7 +8,7 @@
 2. ✅ GitHub 倉庫
 3. ✅ Azure App Service Plan（例：`web-app`）
 4. ✅ Azure App Service（例：`azure-web-app-api`）
-5. ✅ GitHub Secrets：`AZURE_WEBAPP_PUBLISH_PROFILE`（發佈設定檔）
+5. ✅ GitHub Secrets：`AZURE_CREDENTIALS`（Azure Service Principal 憑證）
 
 ---
 
@@ -16,7 +16,7 @@
 
 ### 📘 自動部署（推薦）
 
-自動部署通過 GitHub Actions 在每次 push 到 `main` 分支時觸發。無需手動操作，程式碼會自動編譯、測試、發佈和部署。
+自動部署通過 GitHub Actions 在每次 push 到 `main` 或 `deploy-azure` 分支時觸發。無需手動操作，程式碼會自動編譯、測試、發佈和部署。也支持手動觸發（workflow_dispatch）。
 
 #### 步驟 1️⃣ 確認 App Service 已創建
 
@@ -39,44 +39,65 @@ az webapp create \
   --runtime "DOTNETCORE|10.0"
 ```
 
-#### 步驟 2️⃣ 取得發佈設定檔
+#### 步驟 2️⃣ 創建 Azure Service Principal 並設定 GitHub Secret
+
+GitHub Actions 需要 Azure 認證憑證才能部署應用。我們使用 Service Principal 進行認證。
 
 ```bash
-# 下載發佈設定檔（XML 格式）
-az webapp deployment list-publishing-profiles \
-  --resource-group Lab \
-  --name azure-web-app-api \
-  --xml
+# 創建 Service Principal 並賦予 Lab 資源群組的 Contributor 權限
+az ad sp create-for-rbac \
+  --name "github-actions-azure-web-app" \
+  --role contributor \
+  --scopes /subscriptions/$(az account show --query id -o tsv)/resourceGroups/Lab \
+  --sdk-auth
+
+# 上述命令會輸出 JSON 格式的憑證，將完整輸出保存到檔案
+# 輸出範例：
+# {
+#   "clientId": "...",
+#   "clientSecret": "...",
+#   "subscriptionId": "...",
+#   "tenantId": "...",
+#   ...
+# }
 ```
 
-#### 步驟 3️⃣ 設定 GitHub Secret
-
-**方式 A：使用 GitHub 網頁界面**
-
-1. 進入你的 GitHub 倉庫
-2. 點擊 **Settings** → **Secrets and variables** → **Actions**
-3. 點擊 **New repository secret**
-4. 名稱：`AZURE_WEBAPP_PUBLISH_PROFILE`
-5. 值：貼上上面的完整 XML 內容
-6. 點擊 **Add secret**
-
-**方式 B：使用 GitHub CLI（更快）**
+**設定 GitHub Secret（使用 GitHub CLI）**
 
 ```bash
-# 將 XML 保存到檔案
-az webapp deployment list-publishing-profiles \
-  --resource-group Lab \
-  --name azure-web-app-api \
-  --xml > /tmp/publish-profile.xml
+# 將 Service Principal 憑證保存到檔案
+az ad sp create-for-rbac \
+  --name "github-actions-azure-web-app" \
+  --role contributor \
+  --scopes /subscriptions/$(az account show --query id -o tsv)/resourceGroups/Lab \
+  --sdk-auth > /tmp/azure-credentials.json
 
 # 設定為 GitHub Secret
-gh secret set AZURE_WEBAPP_PUBLISH_PROFILE \
+gh secret set AZURE_CREDENTIALS \
   --repo yaochangyu/azure-web-app \
-  < /tmp/publish-profile.xml
+  < /tmp/azure-credentials.json
 
-# 驗證 Secret 已設定
-gh secret list --repo yaochangyu/azure-web-app
+# 刪除本地憑證檔案（安全考量）
+rm /tmp/3️⃣ 推送程式碼以觸發部署
+
+```bash
+# 進行代碼修改後
+git add .
+git commit -m "Your commit message"
+git push origin main  # 或 git push origin deploy-azure
 ```
+
+**自動部署將立即開始！** 🚀
+
+或者手動觸發部署：
+1. 進入 GitHub 倉庫
+2. 點擊 **Actions** 標籤
+3. 選擇 **Deploy to Azure App Service** workflow
+4. 點擊 **Run workflow** 按鈕* → **Secrets and variables** → **Actions**
+3. 點擊 **New repository secret**
+4. 名稱：`AZURE_CREDENTIALS`
+5. 值：貼上 Service Principal 的完整 JSON 內容
+6. 點擊 **Add secret**
 
 #### 步驟 4️⃣ 推送程式碼以觸發部署
 
@@ -171,15 +192,25 @@ az webapp show \
 # 測試天氣預報 API
 curl -s https://azure-web-app-api.azurewebsites.net/api/weatherforecast | jq .
 
-# 測試版本 API
-curl -s https://azure-web-app-api.azurewebsites.net/api/version | jq .
-```
+# 測# 應該看到 AZURE_CREDENTIALS
+   ```
 
-#### 手動部署的用途
+2. **查看 GitHub Actions 日誌**
+   - 進入倉庫 → **Actions** 標籤
+   - 點擊失敗的工作流查看錯誤訊息
 
-⚡ 需要立即部署時使用  
-🔧 測試部署配置  
-📋 在本地驗證應用後部署  
+3. **檢查 App Service 狀態**
+   ```bash
+   az webapp show --resource-group Lab --name azure-web-app-api --query "state"
+   ```
+
+4. **驗證 Azure 認證**
+   ```bash
+   # 測試 Service Principal 是否有效
+   az login --service-principal \
+     -u <clientId> \
+     -p <clientSecret> \
+     --tenant <tenantId>
 
 ---
 
@@ -217,7 +248,45 @@ curl -s https://azure-web-app-api.azurewebsites.net/api/version | jq .
 
 ### 天氣預報 API
 ```
-GET /api/weatherforecast
+## 部署架構
+
+### GitHub Actions Workflow 流程
+
+```
+1. 觸發條件
+   ├─ Push 到 main 分支
+   ├─ Push 到 deploy-azure 分支
+   └─ 手動觸發 (workflow_dispatch)
+   
+2. 建置階段
+   ├─ Checkout 代碼
+   ├─ 設置 .NET 10.0 SDK
+   ├─ 恢復依賴 (dotnet restore)
+   ├─ 編譯專案 (dotnet build)
+   └─ 發佈專案 (dotnet publish)
+   
+3. 打包階段
+   └─ 創建 ZIP 部署包
+   
+4. 部署階段
+   ├─ 使用 Service Principal 登入 Azure
+   └─ 使用 Azure CLI 部署到 App Service
+```
+
+### 認證方式
+
+- **舊方式**: 使用 Publish Profile (XML) + `azure/webapps-deploy` action
+- **新方式**: 使用 Service Principal (JSON) + Azure CLI ✅ (目前使用)
+
+新方式的優點：
+- 更靈活的權限控制
+- 可以執行更多 Azure 操作
+- 不依賴特定的 GitHub Action
+- 更容易進行故障排查
+
+---
+
+🎉 部署完成！推薦使用自動部署，只需 `git push origin main` 或 `git push origin deploy-azure
 ```
 
 ### 版本 API
