@@ -48,3 +48,12 @@ jobs:
           --name azure-web-app-api \
           --src-path ./deployment.zip \
           --type zip
+    
+    - name: Set App Settings with Git Info
+      run: |
+        az webapp config appsettings set \
+          --resource-group Lab \
+          --name azure-web-app-api \
+          --settings \
+            COMMIT_HASH="${{ github.sha }}" \
+            COMMIT_DATE="$(git log -1 --format=%cd --date=iso)"

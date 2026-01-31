@@ -16,7 +16,9 @@ public class VersionController : ControllerBase
         {
             Version = "1.0.2",
             BuildDate = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss"),
-            Environment = env.EnvironmentName
+            Environment = env.EnvironmentName,
+            CommitHash = System.Environment.GetEnvironmentVariable("COMMIT_HASH") ?? "unknown",
+            CommitDate = System.Environment.GetEnvironmentVariable("COMMIT_DATE") ?? "unknown"
         };
     }
 }
