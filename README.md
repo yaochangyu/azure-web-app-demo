@@ -231,7 +231,7 @@ dotnet dev-certs https --trust
 ### Q: 如何查看 OpenAPI/Swagger 文檔？
 **A:** 在開發模式下運行應用，然後訪問：
 ```
-http://localhost:5000/openapi/v1.json
+http://localhost:5074/openapi/v1.json
 ```
 
 ### Q: How to view OpenAPI/Swagger documentation?
