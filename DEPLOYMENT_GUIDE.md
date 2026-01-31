@@ -16,7 +16,7 @@
 
 ### 📘 自動部署（推薦）
 
-自動部署通過 GitHub Actions 在每次 push 到 `main` 或 `deploy-azure` 分支時觸發。無需手動操作，程式碼會自動編譯、測試、發佈和部署。也支持手動觸發（workflow_dispatch）。
+自動部署通過 GitHub Actions 在每次 push 到 `main` 分支時觸發。無需手動操作，程式碼會自動編譯、測試、發佈和部署。也支持手動觸發（workflow_dispatch）。
 
 #### 步驟 1️⃣ 確認 App Service 已創建
 
@@ -84,7 +84,7 @@ rm /tmp/3️⃣ 推送程式碼以觸發部署
 # 進行代碼修改後
 git add .
 git commit -m "Your commit message"
-git push origin main  # 或 git push origin deploy-azure
+git push origin main
 ```
 
 **自動部署將立即開始！** 🚀
@@ -255,7 +255,6 @@ curl -s https://azure-web-app-api.azurewebsites.net/api/weatherforecast | jq .
 ```
 1. 觸發條件
    ├─ Push 到 main 分支
-   ├─ Push 到 deploy-azure 分支
    └─ 手動觸發 (workflow_dispatch)
    
 2. 建置階段
@@ -286,7 +285,7 @@ curl -s https://azure-web-app-api.azurewebsites.net/api/weatherforecast | jq .
 
 ---
 
-🎉 部署完成！推薦使用自動部署，只需 `git push origin main` 或 `git push origin deploy-azure
+🎉 部署完成！推薦使用自動部署，只需 `git push origin main` 即可。
 ```
 
 ### 版本 API
