@@ -1,6 +1,8 @@
-# Azure App Service 快速上手指南
+# Azure App Service 搭配 GitHub Actions 完整部署指南
 
-Azure App Service 是微軟提供的全託管式 Web 應用程式平台，讓開發者能專注於程式開發，不需要擔心基礎架構的管理。這篇文章會介紹如何使用 Azure App Service 部署和管理你的 Web 應用程式。
+Azure App Service 是微軟提供的全託管式 Web 應用程式平台，讓開發者能專注於程式開發，不需要擔心基礎架構的管理。搭配 GitHub Actions，可以實現完全自動化的持續部署流程。
+
+這篇文章會介紹如何使用 Azure App Service 部署和管理 Web 應用程式，以及透過 GitHub Actions 實現 CI/CD 自動部署。
 
 ---
 
@@ -83,34 +85,37 @@ az webapp create \
 
 有三種部署方式：
 
-#### 方式 A：本機部署
+#### 方式 A：本機手動部署
 
 ```bash
-# 發佈應用程式
-dotnet publish -c Release -o ./publish
+# 發佈應用程式到指定目錄
+dotnet publish AspNetCoreApp/AspNetCoreApp.csproj \
+  --configuration Release \
+  --output ./publish-local \
+  --force
 
-# 建立部署 ZIP
-cd publish
-zip -r ../app.zip .
+# 進入發佈目錄並建立 ZIP（重要：ZIP 結構要正確）
+cd ./publish-local
+zip -r ../publish-local.zip .
+cd ..
 
 # 部署到 Azure
 az webapp deploy \
   --resource-group Lab \
   --name azure-web-app-api \
-  --src-path ../app.zip \
+  --src-path ./publish-local.zip \
   --type zip
 ```
 
-#### 方式 B：GitHub Actions 自動部署
+**為什麼 ZIP 結構重要？**
 
-參考專案中的 [DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md)，設定 GitHub Actions workflow。
+ZIP 內應該直接包含 `*.dll`、`appsettings.json` 等檔案，而不是嵌套在 `publish-local/` 目錄內。
 
-主要步驟：
-1. 建立 Service Principal
-2. 設定 GitHub Secret：`AZURE_CREDENTIALS`
-3. 推送程式碼到 `main` 分支，自動觸發部署
+#### 方式 B：GitHub Actions 自動部署（推薦）
 
-#### 方式 C：Azure CLI 直接部署
+這是最推薦的方式，能實現持續部署 (CI/CD)。詳見下一章節 [GitHub Actions 持續部署](#github-actions-持續部署)。
+
+#### 方式 C：Azure CLI 快速部署
 
 ```bash
 # 從本機資料夾直接部署
@@ -122,7 +127,361 @@ az webapp up \
 
 ---
 
-## 設定環境變數
+## GitHub Actions 持續部署
+
+GitHub Actions 讓你能自動化從代碼到部署的整個過程。每次 push 到 `main` 分支，都會自動編譯、測試、打包並部署到 Azure App Service。
+
+### 架構流程
+
+```
+┌─────────────────┐
+│  git push main  │
+└────────┬────────┘
+         │
+         v
+    ┌─────────────────────────────┐
+    │  GitHub Actions Triggered   │
+    └────────┬────────────────────┘
+             │
+    ┌────────┴─────────────────────────────┐
+    │                                      │
+    v                                      v
+┌──────────────────────┐          ┌───────────────┐
+│   Build Stage        │          │  Publish      │
+│ - Checkout code      │          │  - ZIP files  │
+│ - Setup .NET 10.0    │──────────┤  - Ready      │
+│ - dotnet restore     │          │    for        │
+│ - dotnet build       │          │    deploy     │
+│ - dotnet publish     │          └───────┬───────┘
+└──────────────────────┘                  │
+                                          v
+                          ┌──────────────────────────┐
+                          │  Deploy to Azure         │
+                          │  - Azure CLI login       │
+                          │  - Upload ZIP            │
+                          │  - App Service restart   │
+                          └──────────────────────────┘
+```
+
+### 設定步驟
+
+#### 步驟 1️⃣ 建立 Service Principal
+
+Service Principal 是一個特殊的 Azure 帳戶，用於自動化任務的認證。
+
+```bash
+# 建立 Service Principal 並取得憑證
+az ad sp create-for-rbac \
+  --name "github-actions-azure-web-app" \
+  --role contributor \
+  --scopes /subscriptions/$(az account show --query id -o tsv)/resourceGroups/Lab \
+  --sdk-auth
+```
+
+**輸出範例**：
+```json
+{
+  "clientId": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+  "clientSecret": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+  "subscriptionId": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+  "tenantId": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+  "activeDirectoryEndpointUrl": "https://login.microsoftonline.com",
+  "resourceManagerEndpointUrl": "https://management.azure.com/",
+  "activeDirectoryGraphResourceId": "https://graph.windows.net/",
+  "sqlManagementEndpointUrl": "https://management.core.windows.net:8443/",
+  "galleryEndpointUrl": "https://gallery.azure.com/",
+  "managementEndpointUrl": "https://management.core.windows.net/"
+}
+```
+
+**⚠️ 安全提醒**：這個 JSON 檔案包含敏感憑證，絕對不要提交到版本控制系統！
+
+#### 步驟 2️⃣ 設定 GitHub Secret
+
+GitHub Secrets 存放機敏資訊（如憑證），GitHub Actions 可以在執行時安全地存取。
+
+**方式 A：使用 GitHub Web UI**
+
+1. 進入 GitHub 倉庫
+2. 點擊 **Settings** → **Secrets and variables** → **Actions**
+3. 點擊 **New repository secret**
+4. 名稱：`AZURE_CREDENTIALS`
+5. 值：貼上上一步輸出的完整 JSON
+6. 點擊 **Add secret**
+
+**方式 B：使用 GitHub CLI**
+
+```bash
+# 將憑證保存到臨時檔案
+az ad sp create-for-rbac \
+  --name "github-actions-azure-web-app" \
+  --role contributor \
+  --scopes /subscriptions/$(az account show --query id -o tsv)/resourceGroups/Lab \
+  --sdk-auth > /tmp/azure-creds.json
+
+# 設定為 GitHub Secret
+gh secret set AZURE_CREDENTIALS \
+  --repo yaochangyu/azure-web-app \
+  < /tmp/azure-creds.json
+
+# 安全地刪除本地憑證檔案
+rm /tmp/azure-creds.json
+```
+
+#### 步驟 3️⃣ 建立 Workflow 檔案
+
+在專案根目錄建立 `.github/workflows/deploy.yml`：
+
+```yaml
+name: Deploy to Azure App Service
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 步驟 1：檢出程式碼
+      - uses: actions/checkout@v4
+
+      # 步驟 2：設置 .NET 環境
+      - name: Setup .NET 10.0
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      # 步驟 3：恢復依賴
+      - name: Restore dependencies
+        run: dotnet restore AspNetCoreApp/AspNetCoreApp.csproj
+
+      # 步驟 4：編譯專案
+      - name: Build
+        run: dotnet build AspNetCoreApp/AspNetCoreApp.csproj --configuration Release --no-restore
+
+      # 步驟 5：發佈專案
+      - name: Publish
+        run: dotnet publish AspNetCoreApp/AspNetCoreApp.csproj --configuration Release --output ${{ github.workspace }}/publish --no-build
+
+      # 步驟 6：建立 ZIP 部署包
+      - name: Create deployment package
+        run: |
+          cd ${{ github.workspace }}/publish
+          zip -r ../app-deployment.zip .
+          cd ..
+
+      # 步驟 7：使用 Azure CLI 登入
+      - name: Azure CLI login
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      # 步驟 8：部署到 Azure App Service
+      - name: Deploy to Azure App Service
+        run: |
+          az webapp deploy \
+            --resource-group Lab \
+            --name azure-web-app-api \
+            --src-path app-deployment.zip \
+            --type zip
+
+      # 步驟 9：記錄部署狀態
+      - name: Check deployment status
+        run: |
+          az webapp show \
+            --resource-group Lab \
+            --name azure-web-app-api \
+            --query "state"
+```
+
+#### 步驟 4️⃣ 觸發自動部署
+
+推送程式碼到 `main` 分支時，GitHub Actions 會自動執行：
+
+```bash
+# 進行代碼修改
+echo "# Updated" >> README.md
+
+# 提交並推送
+git add .
+git commit -m "chore: update README"
+git push origin main
+```
+
+### 監控部署
+
+#### 實時查看部署狀態
+
+1. 進入 GitHub 倉庫
+2. 點擊 **Actions** 標籤
+3. 查看最新的工作流運行
+4. 點擊具體工作流查看詳細步驟
+
+**運行中** 🟡 → **成功** 🟢 → 應用已部署到 Azure
+
+#### 查看部署日誌
+
+```bash
+# 使用 Azure CLI 查看最近的部署
+az webapp deployment list \
+  --resource-group Lab \
+  --name azure-web-app-api \
+  --query "[0].[id, deploymentStatus, endTime]"
+
+# 查看應用程式的即時日誌
+az webapp log tail \
+  --resource-group Lab \
+  --name azure-web-app-api
+```
+
+### 常見問題排除
+
+#### 部署失敗：`AZURE_CREDENTIALS not found`
+
+**原因**：GitHub Secret 未設定正確
+
+**解決方案**：
+```bash
+# 驗證 Secret 已設定
+gh secret list --repo yaochangyu/azure-web-app
+
+# 重新設定 Secret
+gh secret set AZURE_CREDENTIALS < /tmp/azure-creds.json
+```
+
+#### 部署失敗：`Zip structure is incorrect`
+
+**原因**：ZIP 檔案內層級不正確
+
+**解決方案**：確保 ZIP 內直接包含 `*.dll`、`appsettings.json` 等，而不是嵌套在資料夾內：
+
+```bash
+# ❌ 錯誤的結構
+publish/
+  publish/
+    AspNetCoreApp.dll
+    appsettings.json
+
+# ✅ 正確的結構
+publish/
+  AspNetCoreApp.dll
+  appsettings.json
+```
+
+#### 部署失敗：`Service Principal has insufficient permissions`
+
+**原因**：Service Principal 沒有足夠的權限
+
+**解決方案**：確認 Service Principal 已被授予 `contributor` 角色：
+
+```bash
+# 檢查角色指派
+az role assignment list \
+  --assignee <clientId> \
+  --resource-group Lab
+```
+
+### GitHub Actions 最佳實踐
+
+#### 1. 使用環境變數管理配置
+
+在 Workflow 檔案中定義環境變數：
+
+```yaml
+env:
+  AZURE_RESOURCE_GROUP: Lab
+  AZURE_APP_NAME: azure-web-app-api
+  PUBLISH_DIR: publish
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy
+        run: |
+          az webapp deploy \
+            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+            --name ${{ env.AZURE_APP_NAME }} \
+            --src-path ${{ env.PUBLISH_DIR }}-app.zip
+```
+
+#### 2. 新增健康檢查步驟
+
+部署後驗證應用是否正常運行：
+
+```yaml
+- name: Health check
+  run: |
+    for i in {1..5}; do
+      if curl -f https://azure-web-app-api.azurewebsites.net/health; then
+        echo "✅ Health check passed"
+        exit 0
+      fi
+      echo "⏳ Attempt $i/5, waiting..."
+      sleep 10
+    done
+    exit 1
+```
+
+#### 3. 通知部署結果
+
+部署完成後發送通知：
+
+```yaml
+- name: Notify deployment status
+  if: always()
+  run: |
+    if [ "${{ job.status }}" == "success" ]; then
+      echo "✅ Deployment succeeded!"
+    else
+      echo "❌ Deployment failed!"
+    fi
+```
+
+#### 4. 使用 Deployment Slots 進行測試部署
+
+在生產環境前先部署到 Staging Slot：
+
+```yaml
+- name: Deploy to staging slot
+  run: |
+    az webapp deployment slot swap \
+      --resource-group Lab \
+      --name azure-web-app-api \
+      --slot staging
+
+- name: Validation tests
+  run: |
+    # 執行測試...
+    dotnet test AspNetCoreApp.Tests/
+
+- name: Swap to production
+  if: success()
+  run: |
+    az webapp deployment slot swap \
+      --resource-group Lab \
+      --name azure-web-app-api \
+      --slot staging \
+      --target-slot production
+```
+
+### GitHub Actions vs 手動部署
+
+| 特性 | GitHub Actions | 手動部署 |
+|------|---|---|
+| 部署觸發 | 自動 (push / schedule) | 手動執行 |
+| 時間成本 | 低 (無需手動操作) | 高 (需手動執行) |
+| 人為錯誤 | 低 (流程一致) | 高 (易出錯) |
+| 可追蹤性 | 高 (完整日誌) | 中 (需記錄) |
+| 適用場景 | 日常開發/生產環境 | 緊急修復/特殊情況 |
+
+---
+
+
 
 應用程式設定 (Application Settings) 會覆寫 `appsettings.json` 的值。
 
@@ -514,26 +873,41 @@ az webapp log config \
 
 ## 心得
 
-Azure App Service 提供了完整的 PaaS 解決方案，讓開發者專注於商業邏輯而非基礎架構管理。主要優點：
+Azure App Service 搭配 GitHub Actions，提供了完整的 PaaS 解決方案和自動化部署流程：
+
+**Azure App Service 優點**：
 
 ■ **快速部署**：從程式碼到上線只需幾分鐘  
 ■ **自動管理**：不需維護作業系統、修補程式  
 ■ **彈性擴展**：根據流量自動調整資源  
 ■ **整合豐富**：與 Azure 其他服務無縫整合  
 
-搭配 GitHub Actions 實現 CI/CD、結合 Application Insights 監控、使用 Polly 增強韌性，可以建構出穩定可靠的生產環境。
+**GitHub Actions 優點**：
 
-對於中小型應用程式，Azure App Service 絕對是首選方案。如果是超大規模或需要極致客製化的場景，可考慮 Azure Kubernetes Service (AKS)。
+■ **零配置成本**：GitHub 免費提供 Actions（公開倉庫無限使用）  
+■ **自動化部署**：每次 push 自動編譯、測試、部署  
+■ **完全可追蹤**：每次部署的日誌和代碼版本都可查詢  
+■ **靈活定製**：YAML 語法簡單易懂，方便擴展  
+
+**結合使用的優勢**：
+
+✅ 開發者只需專注於代碼品質，無需操心部署細節  
+✅ 部署流程完全自動化，減少人為錯誤  
+✅ Service Principal 與 GitHub Secret 提供安全的認證方式  
+✅ 支援多種部署策略（直接部署、Deployment Slots 測試等）  
+
+對於現代應用開發團隊，Azure App Service + GitHub Actions 是最佳組合。
 
 ---
 
 ## 範例位置
 
-本文範例程式碼：  
+本文完整範例程式碼與配置：  
 [https://github.com/yaochangyu/azure-web-app](https://github.com/yaochangyu/azure-web-app)
 
-相關部署指南：  
-[DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md)
+相關指南：  
+- [DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md) - 部署完整說明
+- [.github/workflows/deploy.yml](.github/workflows/deploy.yml) - GitHub Actions Workflow
 
 ---
 
@@ -541,6 +915,7 @@ Azure App Service 提供了完整的 PaaS 解決方案，讓開發者專注於�
 
 - [Azure App Service 官方文件](https://learn.microsoft.com/azure/app-service/)
 - [Azure CLI 參考](https://learn.microsoft.com/cli/azure/)
+- [GitHub Actions 官方文件](https://docs.github.com/actions)
 - [Application Insights 概觀](https://learn.microsoft.com/azure/azure-monitor/app/app-insights-overview)
 - [Polly GitHub](https://github.com/App-vNext/Polly)
 
