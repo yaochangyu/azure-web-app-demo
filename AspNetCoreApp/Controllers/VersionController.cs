@@ -14,7 +14,7 @@ public class VersionController : ControllerBase
         
         return new VersionInfo
         {
-            Version = "1.0.1",
+            Version = "1.0.2",
             BuildDate = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss"),
             Environment = env.EnvironmentName
         };
