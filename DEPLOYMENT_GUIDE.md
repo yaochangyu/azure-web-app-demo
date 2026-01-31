@@ -1,6 +1,53 @@
-# 部署指南：GitHub Actions 自動部署到 Azure App Service
+# 部署指南:GitHub Actions 自動部署到 Azure App Service
 
 本指南說明如何設定自動部署和手動部署 ASP.NET Core 應用到 Azure App Service。
+
+---
+
+## ⚠️ 開源專案安全提醒
+
+**本專案為公開的開源專案，請務必注意以下安全事項：**
+
+### 🔒 絕對不要提交的內容
+
+❌ **Azure 憑證和密鑰**
+- Service Principal 憑證 (clientId, clientSecret, tenantId)
+- Publish Profile (*.publishsettings)
+- 任何包含密碼的配置檔案
+
+❌ **連接字串**
+- 資料庫連接字串
+- Storage Account 金鑰
+- Redis 連接字串
+- 任何第三方服務的 API 金鑰
+
+❌ **本地配置檔案**
+- `appsettings.Production.json`
+- `appsettings.Local.json`
+- `.env` 檔案
+
+### ✅ 安全最佳實踐
+
+1. **使用 GitHub Secrets** 存儲所有敏感資訊
+2. **定期輪換憑證**（建議每 90 天）
+3. **審查 .gitignore** 確保敏感檔案被排除
+4. **啟用 Azure 安全功能**：
+   - 設定 IP 白名單
+   - 啟用 HTTPS 強制
+   - 使用 Managed Identity（進階）
+5. **遵循最小權限原則**：Service Principal 僅授予必要權限
+
+### 📋 檢查清單
+
+在推送程式碼前，請確認：
+
+- [ ] 沒有硬編碼的密碼或金鑰
+- [ ] 敏感配置已設定為 GitHub Secrets
+- [ ] `.gitignore` 包含所有敏感檔案模式
+- [ ] 已檢視 `git status` 確認沒有意外檔案
+- [ ] 已檢視 `git diff` 確認沒有敏感資訊
+
+---
 
 ## 前置需求
 

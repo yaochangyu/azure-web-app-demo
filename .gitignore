@@ -46,3 +46,21 @@ node_modules/
 
 # Azure
 .azure/
+
+# Sensitive files - NEVER commit these!
+appsettings.*.json
+!appsettings.Development.json
+*.publishsettings
+*.pubxml
+
+# Secrets and credentials
+**/secrets.json
+**/.env
+**/.env.*
+azure-credentials.json
+
+# Azure publish profile
+*.PublishSettings
+
+# Local configuration overrides
+appsettings.Local.json
